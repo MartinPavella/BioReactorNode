@@ -34,6 +34,8 @@ const int light_pins[] = {
   23, 5, 13, 12, 14  // Next to each other on Wemos D1 R32
 };
 
+#define PUMP_PIN 19
+
 long last_message_time = 0;
 
 WiFiClient wifi_client;
@@ -86,6 +88,16 @@ void light_off(unsigned int light_id) {
     digitalWrite(light_pins[light_id], LOW);
   }
 }
+
+void start_pump() {
+  digitalWrite(PUMP_PIN, HIGH);
+}
+
+void stop_pump() {
+  digitalWrite(PUMP_PIN, LOW);
+}
+
+
 
 
 void setup_wifi() {
@@ -213,6 +225,14 @@ void mqtt_callback(char* topic, byte* message, unsigned int length) {
       Serial.print("Action: light off ");
       Serial.println(light_id);
     }
+    else if(str_message == "start_pump"){
+      start_pump();
+      Serial.println("Action: start pump");
+    }
+    else if(str_message == "stop_pump"){
+      stop_pump();
+      Serial.println("Action: stop pump");
+    }
     else{
       Serial.print("!!! Unknown command: ");
       Serial.println(str_message);
@@ -222,6 +242,7 @@ void mqtt_callback(char* topic, byte* message, unsigned int length) {
 
 void setup() {
   pinMode(LED_PIN, OUTPUT);
+  pinMode(PUMP_PIN, OUTPUT);
   for(unsigned i = 0 ; i < NUM_LAYERS ; i++){
     pinMode(valve_pins[i], OUTPUT);
     pinMode(light_pins[i], OUTPUT);
@@ -258,3 +279,4 @@ void loop() {
   //   pub_sub_client.publish(send_to_server_topic, payload);
   // }
 }
+
