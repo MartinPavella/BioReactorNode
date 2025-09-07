@@ -11,30 +11,82 @@
 #include <PubSubClient.h>
 #include <WiFi.h>
 
+// If `MAIN_BOARD` is defined, the code will compile for the main (lights) board.
+// If the symbol is not defined, the code will compile for the secondary (pump) board.
+// #define MAIN_BOARD 1  
+
 #define WIFI_FAIL__NUM_BLINKS 3
 #define MQTT_FAIL__NUM_BLINKS 5
 
 #define LED_PIN 2
 
 /******** MANUALLY SETUP THE DETAILS FOR THE PROGRAMMED ESP ********/
+const char* wifi_network_name = "Nitroduck-BioReactor";
+const char* wifi_network_password = "iGEM2025";
+const char* mqtt_server_uri = "bioreactor.local";
+
+#ifdef MAIN_BOARD
+
 const char* send_to_server_topic = "esp_to_server/rack0";
 const char* receive_from_server_topic = "server_to_esp/rack0";  
 const char* esp_client_name = "esp/rack0";  
 
-const char* wifi_network_name = "Nitroduck-BioReactor";
-const char* wifi_network_password = "REPLACE_WITH_PASSWORD";
-const char* mqtt_server_uri = "bioreactor.local";
+#else  // !MAIN_BOARD
+
+const char* send_to_server_topic = "esp_to_server/pump";
+const char* receive_from_server_topic = "server_to_esp/pump";  
+const char* esp_client_name = "esp/pump";  
+
+#endif  // MAIN_BOARD
+
 
 
 #define NUM_LAYERS 5
+
+// ----------- Pins for the main board ---------------------------------------------------
+#ifdef MAIN_BOARD
 const int valve_pins[] = {
-  27, 16, 17, 25, 26  // Next to each other on Wemos D1 R32
+  // 4, 23, 1, 21, 18  // Old version. (1 is used by UART for Serial communication.)
+  13, 14, 16, 17, 18  // New set.
 };
-const int light_pins[] = {
-  23, 5, 13, 12, 14  // Next to each other on Wemos D1 R32
+const bool valve_relay_active_high[] = {
+  false, false, false, false, false
 };
 
-#define PUMP_PIN 19
+const int light_pins[] = {
+  // 15, 22, 3, 19, 5  // Pin 3 is used for UART Serial communication.
+  19, 21, 22, 23, 32  // New set.
+};  
+const bool light_relay_active_high[] = {
+  // Should be `true`, since we want the relays to be on for shorter (when light is off).
+  // Switched aroud for now.
+  false, false, false, false, false  
+};
+
+const int PROBE_input_pins[] = {
+  // 32, 33, 25, 26, 27  // Old version. (25,26,27 cannot be used while wifi is running)
+  34, 35, 36, 39, 33  // New set.
+};  
+#endif  // MAIN_BOARD
+// ---------------------------------------------------------------------------------------
+
+// ----------- Pins for the pump board ---------------------------------------------------
+#ifndef MAIN_BOARD
+// #define PUMP_PIN 19  // Old version
+
+#define NUM_PERISTALTIC_PUMPS 4
+const int peristaltic_pump_pins[] = {
+  13, 14, 16, 17
+};  
+const int mixing_pump_pin = 18;
+const int additive_mixers_pin = 19;
+const int harvesting_pump_direction_pin = 21;
+const int pwm_harwesting_pump_pin = 23;
+const int ph_reader_pin = 34;
+const int conductivity_reader_pin = 35;
+#endif  // !MAIN_BOARD
+// ---------------------------------------------------------------------------------------
+
 
 long last_message_time = 0;
 
@@ -53,12 +105,16 @@ void blink_led(unsigned int times, unsigned int duration){
   }
 }
 
+#ifdef MAIN_BOARD
 void open_valve(unsigned int valve_id) {
   if(valve_id >= NUM_LAYERS){
     Serial.print("!!! VALVE ID TOO LARGE (open_valve): ");
     Serial.println(valve_id);
   } else {
-    digitalWrite(valve_pins[valve_id], HIGH);
+    if(valve_relay_active_high[valve_id])
+      digitalWrite(valve_pins[valve_id], HIGH);
+    else
+      digitalWrite(valve_pins[valve_id], LOW);
   }
 }
 
@@ -67,7 +123,10 @@ void close_valve(unsigned int valve_id) {
     Serial.print("!!! VALVE ID TOO LARGE (close_valve): ");
     Serial.println(valve_id);
   } else {
-    digitalWrite(valve_pins[valve_id], LOW);
+    if(valve_relay_active_high[valve_id])
+      digitalWrite(valve_pins[valve_id], LOW);
+    else
+      digitalWrite(valve_pins[valve_id], HIGH);
   }
 }
 
@@ -76,7 +135,10 @@ void light_on(unsigned int light_id) {
     Serial.print("!!! LAYER ID TOO LARGE (light_on): ");
     Serial.println(light_id);
   } else {
-    digitalWrite(light_pins[light_id], HIGH);
+    if(light_relay_active_high[light_id])
+      digitalWrite(light_pins[light_id], HIGH);
+    else
+      digitalWrite(light_pins[light_id], LOW);
   }
 }
 
@@ -85,17 +147,50 @@ void light_off(unsigned int light_id) {
     Serial.print("!!! LIGHT ID TOO LARGE (light_off): ");
     Serial.println(light_id);
   } else {
-    digitalWrite(light_pins[light_id], LOW);
+    if(light_relay_active_high[light_id])
+      digitalWrite(light_pins[light_id], LOW);
+    else
+      digitalWrite(light_pins[light_id], HIGH);
   }
 }
 
-void start_pump() {
-  digitalWrite(PUMP_PIN, HIGH);
+void all_lights_on() {
+  for(unsigned i = 0 ; i < NUM_LAYERS ; i++)
+    light_on(i);
+}
+void all_lights_off() {
+  for(unsigned i = 0 ; i < NUM_LAYERS ; i++)
+    light_off(i);
+}
+void all_valves_on() {
+  for(unsigned i = 0 ; i < NUM_LAYERS ; i++)
+    open_valve(i);
+}
+void all_valves_off() {
+  for(unsigned i = 0 ; i < NUM_LAYERS ; i++)
+    close_valve(i);
+}
+
+void close_all_relays(){
+  for(unsigned layer = 0 ; layer < NUM_LAYERS ; layer++){
+    light_off(layer);
+    close_valve(layer);
+  }
+}
+
+#else  // !MAIN_BOARD
+
+void start_pump(int percentage_power) {
+  const int pump_dir = HIGH;  // Can be specified.
+  digitalWrite(harvesting_pump_direction_pin, pump_dir);
+  analogWrite(pwm_harwesting_pump_pin, 255 * percentage_power / 100);
 }
 
 void stop_pump() {
-  digitalWrite(PUMP_PIN, LOW);
+  analogWrite(pwm_harwesting_pump_pin, 0);
 }
+#endif  // MAIN_BOARD
+
 
 
 
@@ -160,16 +255,15 @@ void connect_to_mqtt_server() {
   
 }
 
-bool contains_prefix(String message, char* prefix) {
+bool contains_prefix(String message, String prefix) {
   // Determine if the `message` contains a given prefix.
-  size_t prefix_len = strlen(prefix);
+  size_t prefix_len = prefix.length();
   return message.substring(0, prefix_len) == prefix;
 }
 
-int id_after_prefix(String message, char* prefix) {
+int id_after_prefix(String message, String prefix) {
   // Return the integer, which is stored in the string `message` after some given prefix.
-  size_t prefix_len = strlen(prefix);
-  int id = message.substring(prefix_len).toInt();
+  int id = message.substring(prefix.length()).toInt();
   return id;
 }
 
@@ -197,6 +291,7 @@ void mqtt_callback(char* topic, byte* message, unsigned int length) {
       Serial.println("Action: blink LED.");
       blink_led(1,2000);
     }
+#ifdef MAIN_BOARD 
     else if(contains_prefix(str_message, "open_valve")){
       int valve_id =  id_after_prefix(str_message, "open_valve_");
       open_valve(valve_id);
@@ -225,14 +320,38 @@ void mqtt_callback(char* topic, byte* message, unsigned int length) {
       Serial.print("Action: light off ");
       Serial.println(light_id);
     }
-    else if(str_message == "start_pump"){
-      start_pump();
-      Serial.println("Action: start pump");
+    else if(str_message == "all_lights_on"){
+      all_lights_on();
+      Serial.println("Action: all lights on");
+    }
+    else if(str_message == "all_lights_off"){
+      all_lights_off();
+      Serial.println("Action: all lights off");
+    }
+    else if(str_message == "all_valves_on"){
+      all_valves_on();
+      Serial.println("Action: all valves on");
+    }
+    else if(str_message == "all_valves_off"){
+      all_valves_off();
+      Serial.println("Action: all valves off");
+    }
+
+#else  // !MAIN_BOARD
+
+    else if(contains_prefix(str_message, "start_pump:")){
+      int percentage_power = id_after_prefix(str_message, "start_pump:");
+      start_pump(percentage_power);
+
+      Serial.print("Action: start pump");
+      Serial.println(percentage_power);
     }
     else if(str_message == "stop_pump"){
       stop_pump();
       Serial.println("Action: stop pump");
     }
+#endif  // MAIN_BOARD
+
     else{
       Serial.print("!!! Unknown command: ");
       Serial.println(str_message);
@@ -241,42 +360,82 @@ void mqtt_callback(char* topic, byte* message, unsigned int length) {
 }
 
 void setup() {
+  Serial.begin(115200);
+  delay(1000);
+  Serial.println("Booting...");
+  
   pinMode(LED_PIN, OUTPUT);
-  pinMode(PUMP_PIN, OUTPUT);
+
+#ifdef MAIN_BOARD
   for(unsigned i = 0 ; i < NUM_LAYERS ; i++){
     pinMode(valve_pins[i], OUTPUT);
     pinMode(light_pins[i], OUTPUT);
+    // analogSetPinAttenuation(PROBE_input_pins[i], ADC_11db);
   }
+  
+  close_all_relays();
 
-  Serial.begin(115200);
+#else  // !MAIN_BOARD
+  for(unsigned i = 0 ; i < NUM_PERISTALTIC_PUMPS ; i++){
+    pinMode(peristaltic_pump_pins[i], OUTPUT);
+  }
+  pinMode(harvesting_pump_direction_pin, OUTPUT);
+  pinMode(mixing_pump_pin, OUTPUT);
+  pinMode(additive_mixers_pin, OUTPUT);
 
+  pinMode(pwm_harwesting_pump_pin, OUTPUT);  // PWM output.
+  
+  analogSetPinAttenuation(ph_reader_pin, ADC_11db);
+  analogSetPinAttenuation(conductivity_reader_pin, ADC_11db);
+
+
+#endif  // MAIN_BOARD
+
+
+  
   setup_wifi();
-
+  
   int mqtt_port = 1883;  // Default MQTT port.
   pub_sub_client.setServer(mqtt_server_uri, mqtt_port);
   pub_sub_client.setCallback(mqtt_callback);
 }
 
 void loop() {
+
   if (!pub_sub_client.connected()) {
     connect_to_mqtt_server();
   }
 
   pub_sub_client.loop();
 
-  // SIMULATED SENSOR READINGS (for testing purposes)
-  //
+
+
+  
+  // TODO Rework!
+  // // Send PROBE sensor readings.
+  // int interval_seconds = 1;
   // long now = millis();
-  // if (now - last_message_time > 1000) {
+  // if (now - last_message_time > interval_seconds * 1000) {
   //   last_message_time = now;
 
-  //   int reading = random(80,100);  // Simulate some sensor reading.
-  //   unsigned int buf_size = 4;
-  //   char payload[buf_size] = {0,};
-  //   String(reading).toCharArray(payload, buf_size);
-  //   Serial.println(payload);
+  //   // 9 ("PROBE[i]:") + 4 (decimal chars of read value) + 1 (zero byte). E.g. "PROBE[2]:1337\0"
+  //   unsigned int buf_size = 9 + 4 + 1;  
+  //   char buffer[buf_size] = {0,};
+  //   for(unsigned i = 0 ; i < NUM_LAYERS ; i++){
+  //     // Read the value.
+  //     String reading = String(analogRead(PROBE_input_pins[i]));
+      
+  //     // Prepare the buffer to send.
+  //     String payload = String("PROBE[") + String(i) + String("]:") + reading;
+  //     payload.toCharArray(buffer, buf_size);  
 
-  //   pub_sub_client.publish(send_to_server_topic, payload);
+  //     // Log and publish to server.
+  //     Serial.print("Reading PROBE[" + String(i) + "]: " + reading);
+  //     Serial.println(String("\tSending: ") + payload);
+
+  //     // TODO 
+  //     // pub_sub_client.publish(send_to_server_topic, buffer);
+  //   }
+  //
   // }
 }
-
