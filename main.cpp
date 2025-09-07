@@ -185,9 +185,29 @@ void start_pump(int percentage_power) {
   digitalWrite(harvesting_pump_direction_pin, pump_dir);
   analogWrite(pwm_harwesting_pump_pin, 255 * percentage_power / 100);
 }
-
 void stop_pump() {
   analogWrite(pwm_harwesting_pump_pin, 0);
+}
+
+void start_peristaltic_pump(int id_) {
+  digitalWrite(peristaltic_pump_pins[id_], HIGH);
+}
+void stop_peristaltic_pump(int id_) {
+  digitalWrite(peristaltic_pump_pins[id_], LOW);
+}
+
+void additive_mixing_on() {
+  digitalWrite(additive_mixers_pin, HIGH);
+}
+void additive_mixing_off() {
+  digitalWrite(additive_mixers_pin, LOW);
+}
+
+void reservoir_mixing_on() {
+  digitalWrite(mixing_pump_pin, HIGH);
+}
+void reservoir_mixing_off() {
+  digitalWrite(mixing_pump_pin, LOW);
 }
 #endif  // MAIN_BOARD
 
@@ -350,6 +370,39 @@ void mqtt_callback(char* topic, byte* message, unsigned int length) {
       stop_pump();
       Serial.println("Action: stop pump");
     }
+
+    else if(contains_prefix(str_message, "peristaltic_on:")){
+      int id_ = id_after_prefix(str_message, "peristaltic_on:");
+      start_peristaltic_pump(id_);
+
+      Serial.print("Action: peristatlic pump on ");
+      Serial.println(id_);
+    }
+    else if(contains_prefix(str_message, "peristaltic_off:")){
+      int id_ = id_after_prefix(str_message, "peristaltic_off:");
+      stop_peristaltic_pump(id_);
+
+      Serial.print("Action: peristatlic pump off ");
+      Serial.println(id_);
+    }
+
+    else if(str_message == "additive_mixing_on"){
+      additive_mixing_on();
+      Serial.println("Action: additive mixing on");
+    }
+    else if(str_message == "additive_mixing_off"){
+      additive_mixing_off();
+      Serial.println("Action: additive mixing off");
+    }
+
+    else if(str_message == "reservoir_mixing_on"){
+      reservoir_mixing_on();
+      Serial.println("Action: reservoir mixing on");
+    }
+    else if(str_message == "reservoir_mixing_off"){
+      reservoir_mixing_off();
+      Serial.println("Action: reservoir mixing off");
+    }
 #endif  // MAIN_BOARD
 
     else{
@@ -390,8 +443,6 @@ void setup() {
 
 
 #endif  // MAIN_BOARD
-
-
   
   setup_wifi();
   
@@ -407,35 +458,4 @@ void loop() {
   }
 
   pub_sub_client.loop();
-
-
-
-  
-  // TODO Rework!
-  // // Send PROBE sensor readings.
-  // int interval_seconds = 1;
-  // long now = millis();
-  // if (now - last_message_time > interval_seconds * 1000) {
-  //   last_message_time = now;
-
-  //   // 9 ("PROBE[i]:") + 4 (decimal chars of read value) + 1 (zero byte). E.g. "PROBE[2]:1337\0"
-  //   unsigned int buf_size = 9 + 4 + 1;  
-  //   char buffer[buf_size] = {0,};
-  //   for(unsigned i = 0 ; i < NUM_LAYERS ; i++){
-  //     // Read the value.
-  //     String reading = String(analogRead(PROBE_input_pins[i]));
-      
-  //     // Prepare the buffer to send.
-  //     String payload = String("PROBE[") + String(i) + String("]:") + reading;
-  //     payload.toCharArray(buffer, buf_size);  
-
-  //     // Log and publish to server.
-  //     Serial.print("Reading PROBE[" + String(i) + "]: " + reading);
-  //     Serial.println(String("\tSending: ") + payload);
-
-  //     // TODO 
-  //     // pub_sub_client.publish(send_to_server_topic, buffer);
-  //   }
-  //
-  // }
 }
