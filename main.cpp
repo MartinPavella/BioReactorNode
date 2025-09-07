@@ -178,6 +178,29 @@ void close_all_relays(){
   }
 }
 
+void read_and_publish_probe_measurement() {
+  // Prepare the buffer to send. The format is: "PROBE[<layer_id>]:<raw_value>"
+  // 6 ("PROBE[") + 1 (layer number decimal) + 2 (]:) + 4 (decimal chars of the read value) + 1 (zero byte). E.g. "PROBE[0]:1234\0"
+  unsigned int buf_size = 6 +1 + 2 + 4 + 1;  
+  char buffer[buf_size] = {0,};
+
+  // Read the values.
+  for(unsigned layer = 0 ; layer < NUM_LAYERS ; layer++){
+    String probe_reading = String(analogRead(PROBE_input_pins[layer]));
+
+    String payload = String("PROBE[") + String(layer) + String("]:") + probe_reading;
+    payload.toCharArray(buffer, buf_size);  
+
+    // Log and publish to server.
+    Serial.println("Reading PROBE[" + String(layer) + "] = " + probe_reading);
+    Serial.println(String("\tSending: ") + buffer);
+    pub_sub_client.publish(send_to_server_topic, buffer);
+  }
+  
+
+
+}
+
 #else  // !MAIN_BOARD
 
 void start_pump(int percentage_power) {
@@ -210,23 +233,21 @@ void reservoir_mixing_off() {
   digitalWrite(mixing_pump_pin, LOW);
 }
 
-void read_ph_and_cunductivity() {
-
-
+void read_and_publish_ph_and_cunductivity_measurement() {
   // Read the values.
   String ph_reading = String(analogRead(ph_reader_pin));
   String conductivity_reading = String(analogRead(conductivity_reader_pin));
   
   // Prepare the buffer to send. The format is: "ph-cond:<ph_value>:<conductivity_value>"
-  // 8 ("ph-cond:") + 4 (decimal chars of ph read value) + 1 (:) + 4 (conductivity value) : 1 (zero byte). E.g. "ph-cond:1337:1234\0"
+  // 8 ("ph-cond:") + 4 (decimal chars of ph read value) + 1 (:) + 4 (conductivity value) + 1 (zero byte). E.g. "ph-cond:1337:1234\0"
   unsigned int buf_size = 8 + 4 + 1 + 4 + 1;  
   char buffer[buf_size] = {0,};
   String payload = String("ph-cond:") + ph_reading + String(":") + conductivity_reading;
   payload.toCharArray(buffer, buf_size);  
 
   // Log and publish to server.
-  Serial.print("Reading ph = " + ph_reading + ", conductivity = " + conductivity_reading);
-  Serial.println(String("\tSending: ") + payload);
+  Serial.println("Reading ph = " + ph_reading + ", conductivity = " + conductivity_reading);
+  Serial.println(String("\tSending: ") + buffer);
   pub_sub_client.publish(send_to_server_topic, buffer);
 
 }
@@ -348,6 +369,7 @@ void mqtt_callback(char* topic, byte* message, unsigned int length) {
       Serial.print("Action: close valve ");
       Serial.println(valve_id);
     }
+
     else if(contains_prefix(str_message, "light_on")){
       int light_id = id_after_prefix(str_message, "light_on_");
       light_on(light_id);
@@ -362,6 +384,7 @@ void mqtt_callback(char* topic, byte* message, unsigned int length) {
       Serial.print("Action: light off ");
       Serial.println(light_id);
     }
+
     else if(str_message == "all_lights_on"){
       all_lights_on();
       Serial.println("Action: all lights on");
@@ -370,6 +393,7 @@ void mqtt_callback(char* topic, byte* message, unsigned int length) {
       all_lights_off();
       Serial.println("Action: all lights off");
     }
+
     else if(str_message == "all_valves_on"){
       all_valves_on();
       Serial.println("Action: all valves on");
@@ -377,6 +401,11 @@ void mqtt_callback(char* topic, byte* message, unsigned int length) {
     else if(str_message == "all_valves_off"){
       all_valves_off();
       Serial.println("Action: all valves off");
+    }
+
+    else if(str_message == "trigger_probe_measurement"){
+      Serial.println("Action: PROBE measurement");
+      read_and_publish_probe_measurement();
     }
 
 #else  // !MAIN_BOARD
@@ -427,8 +456,8 @@ void mqtt_callback(char* topic, byte* message, unsigned int length) {
     }
 
     else if(str_message == "trigger_ph_cond_measurement"){
-      read_ph_and_cunductivity();
       Serial.println("Action: pH and conductivity measurement");
+      read_and_publish_ph_and_cunductivity_measurement();
     }
 
 #endif  // MAIN_BOARD
