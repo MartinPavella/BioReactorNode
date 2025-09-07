@@ -209,6 +209,28 @@ void reservoir_mixing_on() {
 void reservoir_mixing_off() {
   digitalWrite(mixing_pump_pin, LOW);
 }
+
+void read_ph_and_cunductivity() {
+
+
+  // Read the values.
+  String ph_reading = String(analogRead(ph_reader_pin));
+  String conductivity_reading = String(analogRead(conductivity_reader_pin));
+  
+  // Prepare the buffer to send. The format is: "ph-cond:<ph_value>:<conductivity_value>"
+  // 8 ("ph-cond:") + 4 (decimal chars of ph read value) + 1 (:) + 4 (conductivity value) : 1 (zero byte). E.g. "ph-cond:1337:1234\0"
+  unsigned int buf_size = 8 + 4 + 1 + 4 + 1;  
+  char buffer[buf_size] = {0,};
+  String payload = String("ph-cond:") + ph_reading + String(":") + conductivity_reading;
+  payload.toCharArray(buffer, buf_size);  
+
+  // Log and publish to server.
+  Serial.print("Reading ph = " + ph_reading + ", conductivity = " + conductivity_reading);
+  Serial.println(String("\tSending: ") + payload);
+  pub_sub_client.publish(send_to_server_topic, buffer);
+
+}
+
 #endif  // MAIN_BOARD
 
 
@@ -403,6 +425,12 @@ void mqtt_callback(char* topic, byte* message, unsigned int length) {
       reservoir_mixing_off();
       Serial.println("Action: reservoir mixing off");
     }
+
+    else if(str_message == "trigger_ph_cond_measurement"){
+      read_ph_and_cunductivity();
+      Serial.println("Action: pH and conductivity measurement");
+    }
+
 #endif  // MAIN_BOARD
 
     else{
