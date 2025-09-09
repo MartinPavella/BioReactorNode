@@ -13,7 +13,7 @@
 
 // If `MAIN_BOARD` is defined, the code will compile for the main (lights) board.
 // If the symbol is not defined, the code will compile for the secondary (pump) board.
-// #define MAIN_BOARD 1  
+#define MAIN_BOARD 1  
 
 #define WIFI_FAIL__NUM_BLINKS 3
 #define MQTT_FAIL__NUM_BLINKS 5
@@ -46,26 +46,23 @@ const char* esp_client_name = "esp/pump";
 // ----------- Pins for the main board ---------------------------------------------------
 #ifdef MAIN_BOARD
 const int valve_pins[] = {
-  // 4, 23, 1, 21, 18  // Old version. (1 is used by UART for Serial communication.)
-  13, 14, 16, 17, 18  // New set.
+  16, 23, 32, 21, 18
 };
 const bool valve_relay_active_high[] = {
   false, false, false, false, false
 };
 
 const int light_pins[] = {
-  // 15, 22, 3, 19, 5  // Pin 3 is used for UART Serial communication.
-  19, 21, 22, 23, 32  // New set.
+  13, 22, 14, 19, 17
 };  
 const bool light_relay_active_high[] = {
-  // Should be `true`, since we want the relays to be on for shorter (when light is off).
+  // Should be changed `true`, since we want the relays to be on for shorter (when light is off).
   // Switched aroud for now.
   false, false, false, false, false  
 };
 
 const int PROBE_input_pins[] = {
-  // 32, 33, 25, 26, 27  // Old version. (25,26,27 cannot be used while wifi is running)
-  34, 35, 36, 39, 33  // New set.
+   39, 33, 34, 35, 36
 };  
 #endif  // MAIN_BOARD
 // ---------------------------------------------------------------------------------------
